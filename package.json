@@ -1,0 +1,18 @@
+{
+  "name": "turbo-c-lab",
+  "version": "1.0.0",
+  "description": "Turbo C++ 3.2 DOSBox WebAssembly Compiler & CS11CL01 Lab",
+  "main": "service-worker.js",
+  "scripts": {
+    "test": "jest"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "devDependencies": {
+    "jest": "^30.5.1",
+    "jest-environment-jsdom": "^30.5.1",
+    "puppeteer": "^25.11.0"
+  }
+}

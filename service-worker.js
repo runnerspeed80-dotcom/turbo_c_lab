@@ -1,0 +1,128 @@
+// service-worker.js
+
+const CACHE_NAME = "turboc-cache-v10";
+
+// Only small files are pre-cached. Big files (js-dos, emulators, TURBOC3.zip, turboc.jsdos)
+// are cached automatically the first time they are used, by the fetch handler below.
+const FILES_TO_CACHE = [
+  "./",
+  "./index.html",
+  "./manifest.json",
+  "icon-1-48.png",
+  "icon-1-96.png",
+  "icon-1-144.png",
+  "icon-1-192.png"
+];
+
+// Helper to prevent caching non-OK or uncacheable responses (e.g., Cache-Control: no-store, no-cache, private)
+function isCacheable(response) {
+  if (!response || !response.ok) return false;
+  const cacheControl = response.headers.get("Cache-Control");
+  if (cacheControl) {
+    const lc = cacheControl.toLowerCase();
+    if (lc.includes("no-store") || lc.includes("no-cache") || lc.includes("private")) {
+      return false;
+    }
+  }
+  return true;
+}
+
+let cachePromise;
+function getCache() {
+  if (!cachePromise) {
+    cachePromise = caches.open(CACHE_NAME);
+  }
+  return cachePromise;
+}
+
+// =========================
+// Install (Fault-Tolerant)
+// =========================
+self.addEventListener("install", event => {
+  self.skipWaiting();
+  event.waitUntil(
+    getCache().then(cache => {
+      // Fetch each file individually so one 404 does NOT break the service worker
+      return Promise.allSettled(
+        FILES_TO_CACHE.map(url => 
+          fetch(url).then(response => {
+            if (isCacheable(response)) {
+              return cache.put(url, response);
+            }
+          }).catch(err => console.warn("SW failed to cache:", url, err))
+        )
+      );
+    })
+  );
+});
+
+// =========================
+// Activate
+// =========================
+self.addEventListener("activate", event => {
+  event.waitUntil(
+    caches.keys().then(keys => {
+      return Promise.all(
+        keys.map(key => {
+          if (key !== CACHE_NAME) {
+            return caches.delete(key);
+          }
+        })
+      );
+    }).then(() => self.clients.claim())
+  );
+});
+
+// =========================
+// Fetch
+// =========================
+self.addEventListener("fetch", event => {
+  if (event.request.method !== "GET") return;
+
+  let requestUrl;
+  try {
+    requestUrl = new URL(event.request.url);
+  } catch (e) {
+    return;
+  }
+  if (requestUrl.protocol !== "http:" && requestUrl.protocol !== "https:") return;
+
+  // HTML Navigation (Same-Origin Only)
+  if (event.request.mode === "navigate" || event.request.destination === "document") {
+    if (requestUrl.origin !== self.location.origin) return;
+
+    event.respondWith(
+      fetch(event.request)
+        .then(response => {
+          if (isCacheable(response)) {
+            const copy = response.clone();
+            getCache().then(cache => cache.put(event.request, copy));
+          }
+          return response;
+        })
+        .catch(() => caches.match(event.request).then(res => res || caches.match("./")))
+    );
+    return;
+  }
+
+  // Assets / CDN / Scripts
+  event.respondWith(
+    caches.match(event.request).then(cached => {
+      if (cached) {
+        fetch(event.request).then(response => {
+          if (isCacheable(response)) {
+            getCache().then(cache => cache.put(event.request, response.clone()));
+          }
+        }).catch(err => console.warn("SW background fetch failed:", event.request.url, err));
+        return cached;
+      }
+
+      return fetch(event.request).then(response => {
+        if (isCacheable(response)) {
+          getCache().then(cache => cache.put(event.request, response.clone()));
+        }
+        return response;
+      });
+    })
+  );
+});
